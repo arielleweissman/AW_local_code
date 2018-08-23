@@ -1,0 +1,16 @@
+libname cs 'h:\Shared\SAS\HBO GO\Subscription\CS Support\Call Volume Driver Q32017';
+
+proc corr data=cs.NLP_WEEKLY_2;
+var CS_Usage CS_Campaign CS_Inquiry CS_Other CS_Registration_Sign_In_Problem;
+with tv app issue amazon apple audio cable control cost garbage library movie programming review stream support video;
+run;
+
+proc corr data=cs.NLP_WEEKLY_2;
+var CS_Usage CS_Campaign CS_Inquiry CS_Other CS_Registration_Sign_In_Problem;
+with Review_Inquiry Review_Other Review_Usage;
+run;
+
+proc corr data=cs.NLP_WEEKLY_2;
+var EMAIL_CAMPAIGN EMAIL_Cancel_Subscription EMAIL_Fraudulent EMAIL_Inquiry EMAIL_Other EMAIL_Registration_Sign_In_Probl EMAIL_Usage;
+with Review_Inquiry Review_Other Review_Usage;
+run;
