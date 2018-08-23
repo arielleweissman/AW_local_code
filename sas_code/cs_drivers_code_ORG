@@ -1,0 +1,833 @@
+libname cs 'h:\Shared\SAS\HBO GO\Subscription\CS Support\Call Volume Driver';
+
+data d1;
+set cs.model_data;
+run;
+
+proc freq data=cs.CALL_SUMMARY;
+tables reason/missing;
+run;
+
+*LIBNAME nowops netezza server = NYNETEZZA database=nz_nowops   user=hawang   password=HFn971114;
+* usage summary;
+proc sql;
+connect to NETEZZA (server=NYNETEZZA   database=nz_nowops     user="hawang"    password="HFn971114");
+
+create table daily_stream as
+select * from  connection to netezza
+(select cast(stream_min_timestamp_est as date) as act_date,
+ 	extract(dow from act_date) as act_dow,
+ 	sum(i.stream_count) as cnt_requests_ttl,
+ 	sum(case when j.service_provider = 'APPLE' then 1 else 0 end) as cnt_requests_apple,
+ 	sum(case when j.service_provider = 'GOOGLE' then 1 else 0 end) as cnt_requests_google,
+ 	sum(case when j.service_provider = 'ROKU' then 1 else 0 end) as cnt_requests_roku,
+ 	sum(case when i.stream_play_ind = 0 then 1 else 0 end) as cnt_noplay_ttl,
+ 	sum(case when i.stream_play_ind = 0 and j.service_provider = 'APPLE' then 1 else 0 end) as cnt_noplay_apple,
+ 	sum(case when i.stream_play_ind = 0 and j.service_provider = 'GOOGLE' then 1 else 0 end) as cnt_noplay_google,
+ 	sum(case when i.stream_play_ind = 0 and j.service_provider = 'ROKU' then 1 else 0 end) as cnt_noplay_roku,
+ 	count(distinct i.email_id) as cnt_active_ttl,
+ 	count(distinct case when j.service_provider = 'APPLE' then i.email_id end) as cnt_active_apple,
+ 	count(distinct case when j.service_provider = 'GOOGLE' then i.email_id end) as cnt_active_google,
+ 	count(distinct case when j.service_provider = 'ROKU' then i.email_id end) as cnt_active_roku,
+ 	(sum(i.stream_elapsed_play_seconds/3600.)/ count(distinct i.email_id)) as avg_hrs_played_ttl,
+ 	(sum(case when j.service_provider = 'APPLE' then (i.stream_elapsed_play_seconds/3600.) else 0 end)/count(distinct case when j.service_provider = 'APPLE' then i.email_id end))  as avg_hrs_played_apple,
+	(sum(case when j.service_provider = 'GOOGLE' then (i.stream_elapsed_play_seconds/3600.) else 0 end)/count(distinct case when j.service_provider = 'GOOGLE' then i.email_id end))  as avg_hrs_played_google,
+ 	(sum(case when j.service_provider = 'ROKU' then (i.stream_elapsed_play_seconds/3600.) else 0 end)/count(distinct case when j.service_provider = 'ROKU' then i.email_id end))  as avg_hrs_played_roku,
+ 	avg(i.asset_percentage_watched) as avg_percent_watched_ttl,
+ 	avg(case when j.service_provider = 'APPLE' then i.asset_percentage_watched end) as avg_percent_watched_apple,
+ 	avg(case when j.service_provider = 'GOOGLE' then i.asset_percentage_watched end) as avg_percent_watched_google,
+ 	avg(case when j.service_provider = 'ROKU' then i.asset_percentage_watched end) as avg_percent_watched_roku
+from nz_nowp_analytics..hbo_now_stream_detail i join nz_cmdsp..hbo_now_eloqua_user j on i.email_id = j.email_id
+where cast(i.stream_min_timestamp_est as date) >= '2016-01-01' and cast(i.stream_min_timestamp_est as date) <= '2017-02-03'
+group by act_date, act_dow
+order by act_date, act_dow
+);
+disconnect from netezza;
+quit;
+
+data cs.daily_stream;
+set daily_stream;
+	if cnt_requests_ttl >0 then pct_requests_noplay_ttl = (cnt_noplay_ttl/cnt_requests_ttl);
+	if cnt_requests_apple >0 then pct_requests_noplay_apple = (cnt_noplay_apple/cnt_requests_apple);
+	if cnt_requests_google >0 then pct_requests_noplay_google = (cnt_noplay_google/cnt_requests_google);
+	if cnt_requests_roku >0 then pct_requests_noplay_roku = (cnt_noplay_roku/cnt_requests_roku);
+	if cnt_active_ttl > 0 then avg_req_active_ttl = (cnt_requests_ttl/cnt_active_ttl);
+	if cnt_active_apple > 0 then avg_req_active_apple = (cnt_requests_apple/cnt_active_apple);
+	if cnt_active_google > 0 then avg_req_active_google = (cnt_requests_google/cnt_active_google);
+	if cnt_active_roku > 0 then avg_req_active_roku = (cnt_requests_roku/cnt_active_roku);
+	pct_active_apple = (cnt_active_apple/cnt_active_ttl);
+	pct_active_google = (cnt_active_google/cnt_active_ttl);
+	pct_active_roku = (cnt_active_roku/cnt_active_ttl);
+	if act_dow = 1 then dow_1_ind = 1; else dow_1_ind = 0;
+	if act_dow = 2 then dow_2_ind = 1; else dow_2_ind = 0;
+	if act_dow = 3 then dow_3_ind = 1; else dow_3_ind = 0;
+	if act_dow = 4 then dow_4_ind = 1; else dow_4_ind = 0;
+	if act_dow = 5 then dow_5_ind = 1; else dow_5_ind = 0;
+	if act_dow = 6 then dow_6_ind = 1; else dow_6_ind = 0;
+	if act_dow = 7 then dow_7_ind = 1; else dow_7_ind = 0;
+run;
+
+* subsscription summary;
+proc sql;
+connect to NETEZZA (server=NYNETEZZA   database=nz_nowops     user="hawang"    password="HFn971114");
+
+create table daily_sub as
+select * from  connection to netezza
+(select cal_date as act_date,
+	extract(dow from cal_date) as act_dow,
+	sum(case when purchase_n = 1 and subscription_add = 1 then 1 else 0 end) cnt_free_adds_ttl,
+	sum(case when purchase_n = 1 and subscription_add = 1 and service_provider = 'APPLE' then 1 else 0 end) cnt_free_adds_apple,
+	sum(case when purchase_n = 1 and subscription_add = 1 and service_provider = 'GOOGLE' then 1 else 0 end) cnt_free_adds_google,
+	sum(case when purchase_n = 1 and subscription_add = 1 and service_provider = 'ROKU' then 1 else 0 end) cnt_free_adds_roku,
+	sum(case when reconnect = 1 and subscription_add = 1 then 1 else 0 end) cnt_reconnect_adds_ttl,
+	sum(case when reconnect = 1 and subscription_add = 1 and service_provider = 'APPLE' then 1 else 0 end) cnt_reconnect_adds_apple,
+	sum(case when reconnect = 1 and subscription_add = 1 and service_provider = 'GOOGLE' then 1 else 0 end) cnt_reconnect_adds_google,
+	sum(case when reconnect = 1 and subscription_add = 1 and service_provider = 'ROKU' then 1 else 0 end) cnt_reconnect_adds_roku,
+ 	sum(case when auto_renewed = 1 then 1 else 0 end) cnt_renewals_ttl,
+	sum(case when auto_renewed = 1 and service_provider = 'APPLE' then 1 else 0 end) cnt_renewals_apple,
+	sum(case when auto_renewed = 1 and service_provider = 'GOOGLE' then 1 else 0 end) cnt_renewals_google,
+	sum(case when auto_renewed = 1 and service_provider = 'ROKU' then 1 else 0 end) cnt_renewals_roku,
+ 	sum(case when auto_renewed = 1 and purchase_n = 2 then 1 else 0 end) cnt_renewals_free_ttl,
+	sum(case when auto_renewed = 1 and purchase_n = 2 and service_provider = 'APPLE' then 1 else 0 end) cnt_renewals_free_apple,
+	sum(case when auto_renewed = 1 and purchase_n = 2 and service_provider = 'GOOGLE' then 1 else 0 end) cnt_renewals_free_google,
+	sum(case when auto_renewed = 1 and purchase_n = 2 and service_provider = 'ROKU' then 1 else 0 end) cnt_renewals_free_roku,
+  	sum(case when subscription_active = 1 then 1 else 0 end) cnt_sub_ttl,
+	sum(case when subscription_active = 1 and service_provider = 'APPLE' then 1 else 0 end) cnt_sub_apple,
+	sum(case when subscription_active = 1 and service_provider = 'GOOGLE' then 1 else 0 end) cnt_sub_google,
+	sum(case when subscription_active = 1 and service_provider = 'ROKU' then 1 else 0 end) cnt_sub_roku,
+  	sum(case when subscription_active = 1 and purchase_n = 1 then 1 else 0 end) cnt_sub_free_ttl,
+	sum(case when subscription_active = 1 and purchase_n = 1 and service_provider = 'APPLE' then 1 else 0 end) cnt_sub_free_apple,
+	sum(case when subscription_active = 1 and purchase_n = 1 and service_provider = 'GOOGLE' then 1 else 0 end) cnt_sub_free_google,
+	sum(case when subscription_active = 1 and purchase_n = 1 and service_provider = 'ROKU' then 1 else 0 end) cnt_sub_free_roku,
+    sum(case when subscription_active = 1 and (cal_date - cast(expire_date as date)) < 8 then 1 else 0 end) as cnt_expire_ttl,
+    sum(case when subscription_active = 1 and (cal_date - cast(expire_date as date)) < 8 and service_provider = 'APPLE' then 1 else 0 end) as cnt_expire_apple,
+    sum(case when subscription_active = 1 and (cal_date - cast(expire_date as date)) < 8 and service_provider = 'GOOGLE' then 1 else 0 end) as cnt_expire_google,
+    sum(case when subscription_active = 1 and (cal_date - cast(expire_date as date)) < 8 and service_provider = 'ROKU' then 1 else 0 end) as cnt_expire_roku,
+	sum(case when subscription_active = 1 and (cal_date - cast(expire_date as date)) < 8 and purchase_n = 1 then 1 else 0 end) as cnt_expire_free_ttl,
+    sum(case when subscription_active = 1 and (cal_date - cast(expire_date as date)) < 8 and purchase_n = 1 and service_provider = 'APPLE' then 1 else 0 end) as cnt_expire_free_apple,
+    sum(case when subscription_active = 1 and (cal_date - cast(expire_date as date)) < 8 and purchase_n = 1 and service_provider = 'GOOGLE' then 1 else 0 end) as cnt_expire_free_google,
+    sum(case when subscription_active = 1 and (cal_date - cast(expire_date as date)) < 8 and purchase_n = 1 and service_provider = 'ROKU' then 1 else 0 end) as cnt_expire_free_roku
+from hbo_now_transaction
+where cal_date>='2016-01-01' and cal_date<='2017-02-03'
+group by act_date, act_dow
+order by  act_date, act_dow
+);
+
+disconnect from netezza;
+quit;
+
+data cs.daily_sub;
+set daily_sub;
+pct_renewals_apple = (cnt_renewals_apple/cnt_renewals_ttl);
+pct_renewals_google = (cnt_renewals_google/cnt_renewals_ttl);
+pct_renewals_roku = (cnt_renewals_roku/cnt_renewals_ttl);
+pct_renewals_free_apple = (cnt_renewals_free_apple/cnt_renewals_free_ttl);
+pct_renewals_free_google = (cnt_renewals_free_google/cnt_renewals_free_ttl);
+pct_renewals_free_roku = (cnt_renewals_free_roku/cnt_renewals_free_ttl);
+pct_sub_apple = (cnt_sub_apple/cnt_sub_ttl);
+pct_sub_google = (cnt_sub_apple/cnt_sub_ttl);
+pct_sub_roku = (cnt_sub_apple/cnt_sub_ttl);
+pct_sub_free_apple = (cnt_sub_free_apple/cnt_sub_free_ttl);
+pct_sub_free_google = (cnt_sub_free_apple/cnt_sub_free_ttl);
+pct_sub_free_roku = (cnt_sub_free_apple/cnt_sub_free_ttl);
+pct_expire_apple = (cnt_expire_apple/cnt_expire_ttl);
+pct_expire_google = (cnt_expire_apple/cnt_expire_ttl);
+pct_expire_roku = (cnt_expire_apple/cnt_expire_ttl);
+pct_expire_free_apple = (cnt_expire_free_apple/cnt_expire_free_ttl);
+pct_expire_free_google = (cnt_expire_free_apple/cnt_expire_free_ttl);
+pct_expire_free_roku = (cnt_expire_free_apple/cnt_expire_free_ttl);
+run;
+
+
+data cs.model_data;
+merge cs.call_summary_daily cs.daily_stream cs.daily_sub ;
+by act_date;
+where act_date>'01jan2016'd and act_date<'01feb2017'd;
+run;
+data cs.model_data;
+set cs.model_data;
+/*if act_date = '23APR2016'd then event_0_ind = 1; else event_0_ind = 0;
+if act_date = '24APR2016'd then event_1_ind = 1; else event_1_ind = 0;
+if act_date = '25APR2016'd then event_2_ind = 1; else event_2_ind = 0;
+if act_date = '26APR2016'd then event_3_ind = 1; else event_3_ind = 0;
+if act_date = '19JUN2016'd then event_4_ind = 1; else event_4_ind = 0;
+if act_date = '20JUN2016'd then event_5_ind = 1; else event_5_ind = 0;
+if act_date = '07DEC2016'd then event_6_ind = 1; else event_6_ind = 0;*/
+if act_date = '22MAY2016'd then event_7_ind = 0.25;
+	else if act_date = '23MAY2016'd then event_7_ind = 0.5;
+	else if act_date = '24MAY2016'd then event_7_ind = 0.5;
+	else if act_date = '25MAY2016'd then event_7_ind = 1.0;
+	else if act_date = '26MAY2016'd then event_7_ind = 0.5;
+	else if act_date = '27MAY2016'd then event_7_ind = 0.5;
+	else if act_date = '27JUN2016'd then event_7_ind = 0.5;
+	else if act_date = '28JUN2016'd then event_7_ind = 0.5;
+	else if act_date = '29JUN2016'd then event_7_ind = 0.5;
+	else if act_date = '30JUN2016'd then event_7_ind = 0.5;
+	else if act_date = '01JUL2016'd then event_7_ind = 0.25;
+	else if act_date = '05JUL2016'd then event_7_ind = 0.5; else event_7_ind = 0;
+log_cnt_regissue = log(cnt_regissue);
+log_cnt_cancellation = log(cnt_cancellation);
+log_cnt_free_adds_ttl = log(cnt_free_adds_ttl);
+log_cnt_reconnect_adds_ttl = log(cnt_reconnect_adds_ttl);
+log_cnt_renewals_ttl = log(cnt_renewals_ttl);
+log_cnt_renewals_free_ttl = log(cnt_renewals_free_ttl);
+log_cnt_sub_ttl = log(cnt_sub_ttl);
+log_cnt_sub_free_ttl = log(cnt_sub_free_ttl);
+
+run;
+
+data t;a= a= log(16);run;
+
+/** registration call model **/
+
+proc reg data=cs.model_data;
+model  log_cnt_regissue = dow_1_ind	dow_2_ind	dow_3_ind	dow_4_ind	dow_5_ind	dow_6_ind	dow_7_ind	log_cnt_free_adds_ttl	/**cnt_free_adds_apple	cnt_free_adds_google cnt_free_adds_roku**/	log_cnt_reconnect_adds_ttl
+/**cnt_reconnect_adds_apple	cnt_reconnect_adds_google	cnt_reconnect_adds_roku**/	log_cnt_renewals_ttl /**cnt_renewals_apple	cnt_renewals_google	cnt_renewals_roku**/ log_cnt_renewals_free_ttl
+/**cnt_renewals_free_apple	cnt_renewals_free_google	cnt_renewals_free_roku**/	log_cnt_sub_ttl	/**cnt_sub_apple	cnt_sub_google	cnt_sub_roku**/	log_cnt_sub_free_ttl /**cnt_sub_free_apple	cnt_sub_free_google	cnt_sub_free_roku
+cnt_expire_ttl	cnt_expire_apple	cnt_expire_google	cnt_expire_roku	cnt_expire_free_ttl	cnt_expire_free_apple	cnt_expire_free_google	cnt_expire_free_roku	pct_renewals_apple	pct_renewals_google**/
+pct_renewals_roku	pct_renewals_free_apple	pct_renewals_free_google	pct_renewals_free_roku	pct_sub_apple	pct_sub_google	pct_sub_roku	pct_sub_free_apple	pct_sub_free_google	pct_sub_free_roku	pct_expire_apple	
+pct_expire_google	pct_expire_roku	pct_expire_free_apple	pct_expire_free_google	pct_expire_free_roku /*event_0_ind	event_1_ind	event_2_ind	event_3_ind	event_4_ind	event_5_ind	event_6_ind event_7_ind*/
+/ tol vif collin selection=stepwise  details=summary sls=0.1 sle=0.3;
+output out=t1 p=yhat residual=yresid;
+run;
+
+/* use for final registration call model */
+
+proc reg data=cs.model_data;
+model  log_cnt_regissue = dow_1_ind	dow_2_ind	dow_3_ind	dow_4_ind	dow_5_ind	dow_6_ind	dow_7_ind	log_cnt_free_adds_ttl	/**cnt_free_adds_apple	cnt_free_adds_google cnt_free_adds_roku**/	log_cnt_reconnect_adds_ttl
+/**cnt_reconnect_adds_apple	cnt_reconnect_adds_google	cnt_reconnect_adds_roku**/	log_cnt_renewals_ttl /**cnt_renewals_apple	cnt_renewals_google	cnt_renewals_roku**/ log_cnt_renewals_free_ttl
+/**cnt_renewals_free_apple	cnt_renewals_free_google	cnt_renewals_free_roku**/	log_cnt_sub_ttl	/**cnt_sub_apple	cnt_sub_google	cnt_sub_roku**/	log_cnt_sub_free_ttl /**cnt_sub_free_apple	cnt_sub_free_google	cnt_sub_free_roku
+cnt_expire_ttl	cnt_expire_apple	cnt_expire_google	cnt_expire_roku	cnt_expire_free_ttl	cnt_expire_free_apple	cnt_expire_free_google	cnt_expire_free_roku	pct_renewals_apple	pct_renewals_google**/
+pct_renewals_roku	pct_renewals_free_apple	pct_renewals_free_google	pct_renewals_free_roku	pct_sub_apple	pct_sub_google	pct_sub_roku	pct_sub_free_apple	pct_sub_free_google	pct_sub_free_roku	pct_expire_apple	
+pct_expire_google	pct_expire_roku	pct_expire_free_apple	pct_expire_free_google	pct_expire_free_roku /*event_0_ind	event_1_ind	event_2_ind	event_3_ind	event_4_ind	event_5_ind	event_6_ind event_7_ind*/
+/ tol vif collin;
+output out=t1 p=yhat residual=yresid;
+run;
+
+/** cancellation call model **/
+
+proc reg data=cs.model_data;
+model  log_cnt_cancellation = dow_1_ind	dow_2_ind	dow_3_ind	dow_4_ind	dow_5_ind	dow_6_ind	dow_7_ind	log_cnt_free_adds_ttl	/**cnt_free_adds_apple	cnt_free_adds_google cnt_free_adds_roku**/	log_cnt_reconnect_adds_ttl
+/**cnt_reconnect_adds_apple	cnt_reconnect_adds_google	cnt_reconnect_adds_roku**/	log_cnt_renewals_ttl /**cnt_renewals_apple	cnt_renewals_google	cnt_renewals_roku**/	log_cnt_renewals_free_ttl
+/**cnt_renewals_free_apple	cnt_renewals_free_google	cnt_renewals_free_roku**/	log_cnt_sub_ttl	/**cnt_sub_apple	cnt_sub_google	cnt_sub_roku**/	log_cnt_sub_free_ttl	/**cnt_sub_free_apple	cnt_sub_free_google	cnt_sub_free_roku
+cnt_expire_ttl	cnt_expire_apple	cnt_expire_google	cnt_expire_roku	cnt_expire_free_ttl	cnt_expire_free_apple	cnt_expire_free_google	cnt_expire_free_roku**/	pct_renewals_apple	pct_renewals_google
+pct_renewals_roku	pct_renewals_free_apple	pct_renewals_free_google	pct_renewals_free_roku	pct_sub_apple	pct_sub_google	pct_sub_roku	pct_sub_free_apple	pct_sub_free_google	pct_sub_free_roku	pct_expire_apple	
+pct_expire_google	pct_expire_roku	pct_expire_free_apple	pct_expire_free_google	pct_expire_free_roku	event_0_ind	event_1_ind	event_2_ind	event_3_ind	event_4_ind	event_5_ind	event_6_ind event_7_ind
+/ tol vif collin selection=stepwise  details=summary sls=0.1 sle=0.3;
+output out=t1 p=yhat residual=yresid;
+run;
+
+/* use for final cancellation call model */
+
+proc reg data=cs.model_data;
+model  log_cnt_cancellation = dow_1_ind	dow_2_ind	dow_3_ind	dow_4_ind	dow_5_ind	/*dow_6_ind*/ dow_7_ind	log_cnt_free_adds_ttl	/**cnt_free_adds_apple	cnt_free_adds_google cnt_free_adds_roku**/	log_cnt_reconnect_adds_ttl
+/**cnt_reconnect_adds_apple	cnt_reconnect_adds_google	cnt_reconnect_adds_roku**/	log_cnt_renewals_ttl /**cnt_renewals_apple	cnt_renewals_google	cnt_renewals_roku**/	log_cnt_renewals_free_ttl
+/**cnt_renewals_free_apple	cnt_renewals_free_google	cnt_renewals_free_roku**/	log_cnt_sub_ttl	/**cnt_sub_apple	cnt_sub_google	cnt_sub_roku**/	log_cnt_sub_free_ttl	/**cnt_sub_free_apple	cnt_sub_free_google	cnt_sub_free_roku
+cnt_expire_ttl	cnt_expire_apple	cnt_expire_google	cnt_expire_roku	cnt_expire_free_ttl	cnt_expire_free_apple	cnt_expire_free_google	cnt_expire_free_roku**/	pct_renewals_apple	pct_renewals_google
+pct_renewals_roku	/*pct_renewals_free_apple	pct_renewals_free_google	pct_renewals_free_roku	pct_sub_apple	pct_sub_google	pct_sub_roku	pct_sub_free_apple	pct_sub_free_google	pct_sub_free_roku	pct_expire_apple	
+pct_expire_google	pct_expire_roku	pct_expire_free_apple	pct_expire_free_google	pct_expire_free_roku	event_0_ind	event_1_ind	event_2_ind	event_3_ind	event_4_ind	event_5_ind	event_6_ind*/ event_7_ind
+/ tol vif collin;
+output out=t1 p=yhat residual=yresid;
+run;
+
+
+proc sql;
+create table cs.call_summary_qhr as
+select 
+qhr,
+count(case when reason='Inquiry' then 1 end) as cnt_inqury,
+count(case when reason='Cancel Subscription' then 1 end) as cnt_cancellation,
+count(case when reason='Registration/Sign In Problem' then 1 end) as cnt_regissue,
+count(case when reason='Trending Issue' then 1 end) as cnt_trending,
+count(case when reason='Error' then 1 end) as cnt_usage_error,
+count(case when reason='HBO GO Question' then 1 end) as cnt_go,
+count(case when reason='Fraud' then 1 end) as cnt_fraud,
+count(case when reason='Campaign' then 1 end) as cnt_campaign,
+count(case when reason='Unknown' or reason='' or reason is null then 1 end) as cnt_unknow,
+count(*) as cnt_total
+from tt.call_summary
+group by  qhr
+order by  qhr
+;
+quit;
+
+
+
+proc sql;
+create table cs.call_summary_hr as
+select distinct 
+datepart(timestamp) as dt format mmddyy10.,
+cal_date(datepart(timestamp)) as mn,
+weekday(datepart(timestamp)) as dow,
+hour(timestamp) as hr,
+
+count(case when reason='Inquiry' then 1 end) as cnt_inqury_acthr,
+count(case when reason='Cancel Subscription' then 1 end) as cnt_cancellation_acthr,
+count(case when reason='Registration/Sign In Problem' then 1 end) as cnt_regissue_acthr,
+/*count(case when reason='Trending Issue' then 1 end) as cnt_trending,*/
+count(case when reason='Error' then 1 end) as cnt_usage_error_acthr,
+/*count(case when reason='HBO GO Question' then 1 end) as cnt_go,
+count(case when reason='Fraud' then 1 end) as cnt_fraud,
+count(case when reason='Campaign' then 1 end) as cnt_campaign,
+count(case when reason='Unknown' or reason='' or reason is null then 1 end) as cnt_unknow,*/
+count(*) as cnt_total_acthr
+from cs.call_summary
+group by  datepart(timestamp) ,month(datepart(timestamp)),weekday(datepart(timestamp)),hour(timestamp) 
+order by  datepart(timestamp),  month(datepart(timestamp)),weekday(datepart(timestamp)),hour(timestamp) 
+;
+quit;
+
+
+data tt;set cs.model_data;
+keep 
+act_date
+act_dow
+AVG_HRS_PLAYED_TTL
+avg_req_active_ttl
+
+cnt_cancellation 
+cnt_inqury 
+cnt_regissue 
+cnt_total
+cnt_usage_error
+ 
+log_cnt_cancellation 
+log_cnt_inqury
+log_cnt_regissue
+log_cnt_usage_error 
+
+dow_1_ind
+dow_2_ind
+dow_3_ind
+dow_4_ind
+dow_5_ind
+dow_6_ind
+dow_7_ind
+event_0_ind
+event_1_ind
+event_2_ind
+event_3_ind
+event_4_ind
+log_cnt_active_ttl
+log_cnt_device_group_android
+log_cnt_device_group_androidtv
+log_cnt_device_group_chromecast
+log_cnt_free_adds_ttl
+log_cnt_noplay_ttl
+log_cnt_reconnect_adds_ttl
+log_cnt_renewals_free_ttl
+log_cnt_renewals_ttl
+log_cnt_requests_ttl
+log_cnt_sub_free_ttl
+log_cnt_sub_ttl
+pct_renewals_apple
+pct_renewals_roku
+
+cnt_active_ttl
+cnt_device_group_android
+cnt_device_group_androidtv
+cnt_device_group_chromecast
+cnt_free_adds_ttl
+cnt_noplay_ttl
+cnt_reconnect_adds_ttl
+cnt_renewals_free_ttl
+cnt_renewals_ttl
+cnt_requests_ttl
+cnt_sub_free_ttl
+cnt_sub_ttl
+
+;
+run;
+
+* hourly index;
+data cs.dist_hourly;
+input ind  hr ;
+datalines;
+0.929122435 0
+0.626377086 1
+0.392633882 2
+0.248127391 3
+0.176352272 4
+0.140891281 5
+0.197486817 6
+0.339460554 7
+0.434945688 8
+0.749467939 9
+0.984346989 10
+1.147588135 11
+1.258239609 12
+1.326392833 13
+1.382624965 14
+1.396438299 15
+1.532211518 16
+1.547721723 17
+1.510944808 18
+1.577150719 19
+1.603481382 20
+1.742720605 21
+1.532385069 22
+1.222887998 23
+;
+run;
+
+
+proc sql;
+create table forecast_hourly_dt
+as select 
+case when  year(c.month)=2016 then  a.act_date else  intnx('day',act_date,365) end as cal_date format mmddyy10., 
+a.ind as hour_call_index, 
+a.hr as hr_grp,
+
+case when  year(c.month)=2016 then  a.AVG_HRS_PLAYED_TTL else  0 end as AVG_HRS_PLAYED_TTL,
+a.avg_req_active_ttl as avg_req_active_ttl ,/**/
+
+case when weekday(calculated cal_date)=1 then 1 else 0 end as dow_1_ind  ,
+case when weekday(calculated cal_date)=2 then 1 else 0 end as dow_2_ind  ,
+case when weekday(calculated cal_date)=3 then 1 else 0 end as dow_3_ind  ,
+case when weekday(calculated cal_date)=4 then 1 else 0 end as dow_4_ind  ,
+case when weekday(calculated cal_date)=5 then 1 else 0 end as dow_5_ind  ,
+case when weekday(calculated cal_date)=6 then 1 else 0 end as dow_6_ind  ,
+case when weekday(calculated cal_date)=7 then 1 else 0 end as dow_7_ind  ,
+
+case when  year(c.month)=2016 then  a.event_0_ind else  0 end as event_0_ind,
+case when  year(c.month)=2016 then  a.event_1_ind else  0 end as event_1_ind,
+case when  year(c.month)=2016 then  a.event_2_ind else  0 end as event_2_ind,
+case when  year(c.month)=2016 then  a.event_3_ind else  0 end as event_3_ind,
+case when  year(c.month)=2016 then  a.event_4_ind else  0 end as event_4_ind,
+
+case when  year(c.month)=2016 then  a.log_cnt_active_ttl else  0 end as log_cnt_active_ttl,
+case when  year(c.month)=2016 then  a.log_cnt_device_group_android else  0 end as log_cnt_device_group_android,
+case when  year(c.month)=2016 then  a.log_cnt_device_group_androidtv else  0 end as log_cnt_device_group_androidtv,
+case when  year(c.month)=2016 then  a.log_cnt_device_group_chromecast else  0 end as log_cnt_device_group_chromecast,
+case when  year(c.month)=2016 then  a.log_cnt_free_adds_ttl else  0 end as log_cnt_free_adds_ttl,
+case when  year(c.month)=2016 then  a.log_cnt_noplay_ttl else  0 end as log_cnt_noplay_ttl,
+case when  year(c.month)=2016 then  a.log_cnt_reconnect_adds_ttl else  0 end as log_cnt_reconnect_adds_ttl,
+case when  year(c.month)=2016 then  a.log_cnt_renewals_free_ttl else  0 end as log_cnt_renewals_free_ttl,
+case when  year(c.month)=2016 then  a.log_cnt_renewals_ttl else  0 end as log_cnt_renewals_ttl,
+case when  year(c.month)=2016 then  a.log_cnt_requests_ttl else  0 end as log_cnt_requests_ttl,
+case when  year(c.month)=2016 then  a.log_cnt_sub_free_ttl else  0 end as log_cnt_sub_free_ttl,
+case when  year(c.month)=2016 then  a.log_cnt_sub_ttl else  0 end as log_cnt_sub_ttl,
+
+a.pct_renewals_apple  as pct_renewals_apple,/**/
+a.pct_renewals_roku   as pct_renewals_roku,/**/
+
+
+case when  year(c.month)=2016 then  a.cnt_active_ttl 
+     when  year(c.month)=2017 then  (c.free_add_TOTAL+c.paid_TOTAL)/(e.free_add_TOTAL+e.paid_TOTAL)*a.cnt_active_ttl   end as cnt_active_ttl,/**/
+case when  year(c.month)=2016 then  a.cnt_device_group_android      
+     when  year(c.month)=2017 then  (c.free_add_TOTAL+c.paid_TOTAL)/(e.free_add_TOTAL+e.paid_TOTAL)*cnt_device_group_android end as cnt_device_group_android,/**/
+case when  year(c.month)=2016 then  a.cnt_device_group_androidtv       
+     when  year(c.month)=2017 then  (c.free_add_TOTAL+c.paid_TOTAL)/(e.free_add_TOTAL+e.paid_TOTAL)*cnt_device_group_androidtv end as cnt_device_group_androidtv,/**/
+case when  year(c.month)=2016 then  a.cnt_device_group_chromecast       
+     when  year(c.month)=2017 then  (c.free_add_TOTAL+c.paid_TOTAL)/(e.free_add_TOTAL+e.paid_TOTAL)*cnt_device_group_chromecast end as cnt_device_group_chromecast,/**/
+case when  year(c.month)=2016 then  a.cnt_free_adds_ttl       
+     when  year(c.month)=2017 then  (c.free_add_TOTAL)/(e.free_add_TOTAL)*cnt_free_adds_ttl end as cnt_free_adds_ttl,/**/
+case when  year(c.month)=2016 then  a.cnt_noplay_ttl       
+     when  year(c.month)=2017 then  (c.free_add_TOTAL+c.paid_TOTAL)/(e.free_add_TOTAL+e.paid_TOTAL)*cnt_noplay_ttl end as cnt_noplay_ttl,/**/
+case when  year(c.month)=2016 then  a.cnt_reconnect_adds_ttl       
+     when  year(c.month)=2017 then  (c.reconnect_TOTAL)/(e.reconnect_TOTAL)*cnt_reconnect_adds_ttl end as cnt_reconnect_adds_ttl,/**/
+case when  year(c.month)=2016 then  a.cnt_renewals_free_ttl       
+     when  year(c.month)=2017 then  (c.free_add_last)/(e.free_add_last) end as cnt_renewals_free_ttl,/**/
+case when  year(c.month)=2016 then  a.cnt_renewals_ttl       
+     when  year(c.month)=2017 then  (c.paid_last)/(e.paid_last)*a.cnt_renewals_ttl  end as cnt_renewals_ttl,/**/
+case when  year(c.month)=2016 then  a.cnt_sub_free_ttl       
+     when  year(c.month)=2017 then  (c.free_add_last)/(e.free_add_last) end as cnt_sub_free_ttl,/**/
+case when  year(c.month)=2016 then  a.cnt_sub_ttl       
+     when  year(c.month)=2017 then  (c.free_add_TOTAL+c.paid_TOTAL)/(e.free_add_TOTAL+e.paid_TOTAL)*a.cnt_sub_ttl  end as cnt_sub_ttl,/**/
+
+
+c.free_add_TOTAL,
+c.convert_to_paid_TOTAL,
+c.reconnect_TOTAL,
+c.paid_TOTAL,
+c.free_add_APPLE,
+c.convert_to_paid_APPLE,
+c.reconnect_APPLE,
+c.paid_APPLE,
+c.free_add_GOOGLE,
+c.convert_to_paid_GOOGLE,
+c.reconnect_GOOGLE,
+c.paid_GOOGLE,
+c.free_add_ROKU,
+c.convert_to_paid_ROKU,
+c.reconnect_ROKU,
+c.paid_ROKU,
+c.free_add_AMAZON,
+c.convert_to_paid_AMAZON,
+c.reconnect_AMAZON,
+c.paid_AMAZON,
+
+case when  year(c.month)=2016 then  a.log_cnt_cancellation  else  0 end as log_cnt_cancellation ,
+case when  year(c.month)=2016 then  a.log_cnt_inqury  else  0 end as log_cnt_inqury ,
+case when  year(c.month)=2016 then  a.log_cnt_regissue  else  0 end as log_cnt_regissue ,
+case when  year(c.month)=2016 then  a.log_cnt_usage_error  else  0 end as log_cnt_usage_error ,
+
+case when  year(c.month)=2016 then  a.cnt_cancellation  else  0 end as cnt_cancellation ,
+case when  year(c.month)=2016 then  a.cnt_inqury  else  0 end as cnt_inqury ,
+case when  year(c.month)=2016 then  a.cnt_regissue  else  0 end as cnt_regissue ,
+case when  year(c.month)=2016 then  a.cnt_usage_error  else  0 end as cnt_usage_error,  
+case when  year(c.month)=2016 then  a.cnt_total else  0 end as cnt_total
+
+from (select * from tt a1, cs.dist_hourly a2)a  
+inner join (select a.*,
+            b.free_add_TOTAL as free_add_last,
+            b.paid_TOTAL as paid_last
+            from  cs.forecast_monthly a
+            left join cs.forecast_monthly b
+            on  a.month =intnx('month',b.month,1) )  c on month(act_date)=month(c.month) 
+left join cs.call_summary_hr d on a.act_date=d.dt and a.hr=d.hr
+left join (select a.month,  a.free_add_TOTAL, a.convert_to_paid_TOTAL, a.reconnect_TOTAL, a.paid_TOTAL ,
+           b.free_add_TOTAL as free_add_last,
+           b.paid_TOTAL as paid_last
+           from cs.forecast_monthly a
+           left join cs.forecast_monthly b
+           on  a.month =intnx('month',b.month,1) 
+           where year(a.month)=2016
+           ) e on month(act_date)=month(e.month) 
+where year(act_date)=2016
+order by calculated cal_date,hr_grp
+;
+quit;
+
+ /*******************************************************************/
+/** get last month data*/
+proc sql;
+create table forecast_monthly as
+select a.*,
+c.free_add_TOTAL as free_add_TOTAL_last,
+c.convert_to_paid_TOTAL as convert_to_paid_TOTAL_last,
+c.reconnect_TOTAL as reconnect_TOTAL_last,
+c.paid_TOTAL as paid_TOTAL_last,
+c.free_add_APPLE as free_add_APPLE_last,
+c.convert_to_paid_APPLE as convert_to_paid_APPLE_last,
+c.reconnect_APPLE as reconnect_APPLE_last,
+c.paid_APPLE as paid_APPLE_last,
+c.free_add_GOOGLE as free_add_GOOGLE_last,
+c.convert_to_paid_GOOGLE as convert_to_paid_GOOGLE_last,
+c.reconnect_GOOGLE as reconnect_GOOGLE_last,
+c.paid_GOOGLE as paid_GOOGLE_last,
+c.free_add_ROKU as free_add_ROKU_last,
+c.convert_to_paid_ROKU as convert_to_paid_ROKU_last,
+c.reconnect_ROKU as reconnect_ROKU_last,
+c.paid_ROKU as paid_ROKU_last,
+c.free_add_AMAZON as free_add_AMAZON_last,
+c.convert_to_paid_AMAZON as convert_to_paid_AMAZON_last,
+c.reconnect_AMAZON as reconnect_AMAZON_last,
+c.paid_AMAZON as paid_AMAZON_last
+from  cs.forecast_monthly a
+left join cs.forecast_monthly c
+on  a.month =intnx('month',c.month,1) 
+;
+quit;
+
+/* get 2016 index to total */
+proc sql;
+create table  forecast_monthly_index as
+select distinct a.act_date,y2017,
+cnt_active_ttl/((c.free_add_TOTAL+c.paid_TOTAL)*1.0) as index_cnt_active_ttl,
+cnt_device_group_android/((c.free_add_TOTAL+c.paid_TOTAL)*1.0) as index_cnt_device_group_android,
+cnt_device_group_androidtv/((c.free_add_TOTAL+c.paid_TOTAL)*1.0) as index_cnt_device_group_androidtv,
+cnt_device_group_chromecast/((c.free_add_TOTAL+c.paid_TOTAL)*1.0) as index_cnt_device_chromecast,
+cnt_free_adds_ttl/((c.free_add_TOTAL)*1.0) as index_cnt_free_adds_ttl,
+cnt_noplay_ttl/((c.free_add_TOTAL+c.paid_TOTAL)*1.0) as index_cnt_noplay_ttl,
+cnt_reconnect_adds_ttl/((c.reconnect_TOTAL)*1.0) as index_cnt_reconnect_adds_ttl,
+cnt_renewals_free_ttl/((c.free_add_TOTAL_last)*1.0)  as index_cnt_renewals_free_ttl,
+cnt_renewals_ttl/((c.paid_TOTAL_last)*1.0) as index_cnt_renewals_ttl,
+cnt_requests_ttl/((c.free_add_TOTAL+c.paid_TOTAL)*1.0) as index_cnt_requests_ttl,
+cnt_sub_free_ttl/((c.free_add_TOTAL)*1.0) as index_cnt_sub_free_ttl,
+cnt_sub_ttl/((c.free_add_TOTAL+c.paid_TOTAL)*1.0)as index_cnt_sub_ttl,
+pct_renewals_apple,
+pct_renewals_roku,
+avg_req_active_ttl
+from tt a 
+inner join forecast_monthly c on month(a.act_date)=month(c.month) and year(c.month)=2017
+inner join cs.program_date b on a.act_date=y2016
+where year(act_date)=2016
+;
+quit;
+
+
+/*get daily summary for scoring and 2017 projected numbers */
+proc sql;
+create table forecast_daily
+as select 
+case when  year(c.month)=2016 then  a.act_date else  intnx('day',a.act_date,365) end as cal_date format mmddyy10., 
+
+case when  year(c.month)=2016 then  a.cnt_cancellation  else  0 end as cnt_cancellation ,
+case when  year(c.month)=2016 then  a.cnt_inqury  else  0 end as cnt_inqury ,
+case when  year(c.month)=2016 then  a.cnt_regissue  else  0 end as cnt_regissue ,
+case when  year(c.month)=2016 then  a.cnt_usage_error  else  0 end as cnt_usage_error,  
+case when  year(c.month)=2016 then  a.cnt_total else  0 end as cnt_total,
+
+case when  year(c.month)=2016 then  a.log_cnt_cancellation  else  0 end as log_cnt_cancellation ,
+case when  year(c.month)=2016 then  a.log_cnt_inqury  else  0 end as log_cnt_inqury ,
+case when  year(c.month)=2016 then  a.log_cnt_regissue  else  0 end as log_cnt_regissue ,
+case when  year(c.month)=2016 then  a.log_cnt_usage_error  else  0 end as log_cnt_usage_error ,
+
+/*calcuated 2017 model data*/
+case when  year(c.month)=2016 then  a.cnt_active_ttl              when  year(c.month)=2017 then  (c.free_add_TOTAL+c.paid_TOTAL)*index_cnt_active_ttl   end as cnt_active_ttl,/**/
+case when  year(c.month)=2016 then  a.cnt_device_group_android    when  year(c.month)=2017 then  (c.free_add_TOTAL+c.paid_TOTAL)*index_cnt_device_group_android end as cnt_device_group_android,/**/
+case when  year(c.month)=2016 then  a.cnt_device_group_androidtv  when  year(c.month)=2017 then  (c.free_add_TOTAL+c.paid_TOTAL)*index_cnt_device_group_androidtv end as cnt_device_group_androidtv,/**/
+case when  year(c.month)=2016 then  a.cnt_device_group_chromecast when  year(c.month)=2017 then  (c.free_add_TOTAL+c.paid_TOTAL)*index_cnt_device_chromecast end as cnt_device_group_chromecast,/**/
+case when  year(c.month)=2016 then  a.cnt_free_adds_ttl           when  year(c.month)=2017 then  (c.free_add_TOTAL)*index_cnt_free_adds_ttl end as cnt_free_adds_ttl,/**/
+case when  year(c.month)=2016 then  a.cnt_noplay_ttl              when  year(c.month)=2017 then  (c.free_add_TOTAL+c.paid_TOTAL)*index_cnt_noplay_ttl end as cnt_noplay_ttl,/**/
+case when  year(c.month)=2016 then  a.cnt_reconnect_adds_ttl      when  year(c.month)=2017 then  (c.free_add_TOTAL+c.paid_TOTAL)*index_cnt_reconnect_adds_ttl end as cnt_reconnect_adds_ttl,/**/
+case when  year(c.month)=2016 then  a.cnt_renewals_free_ttl       when  year(c.month)=2017 then  (c.free_add_TOTAL_last)*index_cnt_renewals_free_ttl end as cnt_renewals_free_ttl,/**/
+case when  year(c.month)=2016 then  a.cnt_renewals_ttl            when  year(c.month)=2017 then  (c.paid_TOTAL_last)*index_cnt_renewals_ttl  end as cnt_renewals_ttl,/**/
+case when  year(c.month)=2016 then  a.cnt_requests_ttl            when  year(c.month)=2017 then  (c.free_add_TOTAL+c.paid_TOTAL)*index_cnt_requests_ttl  end as cnt_requests_ttl,/**/
+case when  year(c.month)=2016 then  a.cnt_sub_free_ttl            when  year(c.month)=2017 then  (c.free_add_TOTAL_last)*index_cnt_sub_free_ttl end as cnt_sub_free_ttl,/**/
+case when  year(c.month)=2016 then  a.cnt_sub_ttl                 when  year(c.month)=2017 then  (c.free_add_TOTAL+c.paid_TOTAL)*index_cnt_sub_ttl  end as cnt_sub_ttl,/**/
+case when  year(c.month)=2016 then  a.avg_req_active_ttl          when  year(c.month)=2017 then   calculated cnt_requests_ttl/(calculated cnt_active_ttl*1.0) end as avg_req_active_ttl,
+a.pct_renewals_apple,
+a.pct_renewals_roku,
+case when  year(c.month)=2016 then  a.avg_req_active_ttl else cnt_renewals_ttl/cnt_active_ttl end as avg_req_active_ttl ,
+case when  year(c.month)=2016 then  a.log_cnt_active_ttl else  log(calculated  cnt_active_ttl)  end as log_cnt_active_ttl,
+case when  year(c.month)=2016 then  a.log_cnt_device_group_android else    log(calculated cnt_device_group_android) end as log_cnt_device_group_android,
+case when  year(c.month)=2016 then  a.log_cnt_device_group_androidtv else    log(calculated  cnt_device_group_androidtv) end as log_cnt_device_group_androidtv,
+case when  year(c.month)=2016 then  a.log_cnt_device_group_chromecast else    log(calculated cnt_device_group_chromecast) end as log_cnt_device_group_chromecast,
+case when  year(c.month)=2016 then  a.log_cnt_free_adds_ttl else    log(calculated cnt_free_adds_ttl) end as log_cnt_free_adds_ttl,
+case when  year(c.month)=2016 then  a.log_cnt_noplay_ttl else    log(calculated  cnt_noplay_ttl) end as log_cnt_noplay_ttl,
+case when  year(c.month)=2016 then  a.log_cnt_reconnect_adds_ttl else    log(calculated cnt_reconnect_adds_ttl) end as log_cnt_reconnect_adds_ttl,
+case when  year(c.month)=2016 then  a.log_cnt_renewals_free_ttl else    log(calculated  cnt_renewals_free_ttl) end as log_cnt_renewals_free_ttl,
+case when  year(c.month)=2016 then  a.log_cnt_renewals_ttl else    log(calculated  cnt_renewals_ttl) end as log_cnt_renewals_ttl,
+case when  year(c.month)=2016 then  a.log_cnt_requests_ttl else    log(calculated  cnt_requests_ttl) end as log_cnt_requests_ttl,
+case when  year(c.month)=2016 then  a.log_cnt_sub_free_ttl else    log(calculated cnt_sub_free_ttl) end as log_cnt_sub_free_ttl,
+case when  year(c.month)=2016 then  a.log_cnt_sub_ttl else    log(calculated cnt_sub_ttl) end as log_cnt_sub_ttl,
+
+
+case when weekday(calculated cal_date)=1 then 1 else 0 end as dow_1_ind  ,
+case when weekday(calculated cal_date)=2 then 1 else 0 end as dow_2_ind  ,
+case when weekday(calculated cal_date)=3 then 1 else 0 end as dow_3_ind  ,
+case when weekday(calculated cal_date)=4 then 1 else 0 end as dow_4_ind  ,
+case when weekday(calculated cal_date)=5 then 1 else 0 end as dow_5_ind  ,
+case when weekday(calculated cal_date)=6 then 1 else 0 end as dow_6_ind  ,
+case when weekday(calculated cal_date)=7 then 1 else 0 end as dow_7_ind  ,
+
+case when  year(c.month)=2016 then  a.event_0_ind else  0 end as event_0_ind,
+case when  year(c.month)=2016 then  a.event_1_ind else  0 end as event_1_ind,
+case when  year(c.month)=2016 then  a.event_2_ind else  0 end as event_2_ind,
+case when  year(c.month)=2016 then  a.event_3_ind else  0 end as event_3_ind,
+case when  year(c.month)=2016 then  a.event_4_ind else  0 end as event_4_ind
+from tt a  
+inner join forecast_monthly c on month(act_date)=month(c.month) 
+left join cs.call_summary_daily d on a.act_date=d.act_date  
+left join forecast_monthly_index e on  intnx('day',a.act_date,365)= e.y2017 
+where year(a.act_date)=2016
+order by calculated cal_date 
+;
+quit;
+ 
+ 
+
+
+data scored;
+set forecast_daily;
+cnt_inquiry_pred=exp(-3.03693+dow_1_ind*-0.28019+dow_2_ind*0.05333+dow_7_ind*-0.12382+log_cnt_free_adds_ttl*0.27232+log_cnt_reconnect_adds_ttl*0.27709+log_cnt_renewals_free_ttl*0.12647+log_cnt_sub_free_ttl*0.16422+event_1_ind*0.29744);
+cnt_cancellation_pred=exp(-11.48293+dow_1_ind*-0.20702+dow_2_ind*0.27451+dow_3_ind*0.19773+dow_4_ind*0.10997+dow_7_ind*-0.24686+log_cnt_free_adds_ttl*-0.0668+log_cnt_renewals_ttl*0.52072+pct_renewals_apple*10.52457+pct_renewals_roku*21.96063+event_3_ind*1.15895);
+cnt_regissue_pred=exp(3.49374+dow_2_ind*0.28126+dow_3_ind*0.22328+dow_4_ind*0.15557+dow_5_ind*0.05828+log_cnt_reconnect_adds_ttl*0.57106+log_cnt_renewals_ttl*1.12219+log_cnt_sub_ttl*-1.68252+log_cnt_sub_free_ttl*0.81219+pct_renewals_apple*-5.04932+pct_renewals_roku*-12.20469);
+cnt_usage_error_pred=exp(1.72463+dow_1_ind*0.13112+dow_2_ind*0.14182+dow_5_ind*-0.11837+dow_6_ind*-0.13015+log_cnt_noplay_ttl*0.52776+log_cnt_active_ttl*-0.96389+avg_req_active_ttl*-0.53144+log_cnt_device_group_android*0.67437+log_cnt_device_group_androidtv*0.58475+log_cnt_device_group_chromecast*-0.25299+event_0_ind*0.51231+event_4_ind*0.8558);
+run;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ 
+proc sql;
+ select a.month,  a.free_add_TOTAL, a.convert_to_paid_TOTAL, a.reconnect_TOTAL, a.paid_TOTAL,
+         b.free_add_TOTAL as free_add_last,
+         b.paid_TOTAL as paid_last
+           from cs.forecast_monthly a
+           left join cs.forecast_monthly b
+           on  a.month =intnx('month',b.month,1) 
+           where year(a.month)=2016
+		   ;
+
+
+proc sql;
+create table cs.call_summary_daily as
+select 
+datepart(timestamp) as act_date format date9. ,
+weekday(datepart(timestamp)) as act_dow,
+count(case when reason='Inquiry' then 1 end) as cnt_inqury,
+count(case when reason='Cancel Subscription' then 1 end) as cnt_cancellation,
+count(case when reason='Registration/Sign In Problem' then 1 end) as cnt_regissue,
+count(case when reason='Trending Issue' then 1 end) as cnt_trending,
+count(case when reason='Error' then 1 end) as cnt_usage_error,
+count(case when reason='HBO GO Question' then 1 end) as cnt_go,
+count(case when reason='Fraud' then 1 end) as cnt_fraud,
+count(case when reason='Campaign' then 1 end) as cnt_campaign,
+count(case when reason='Unknown' or reason='' or reason is null then 1 end) as cnt_unknow,
+count(*) as cnt_total
+from cs.call_summary
+group by  act_date, act_dow
+order by  act_date
+;
+quit;
+
+data forecast_hourly_dt;
+set forecast_hourly_dt;
+if year(cal_date)=2017 then log_cnt_active_ttl=log(cnt_active_ttl); else  log_cnt_active_ttl=log_cnt_active_ttl;
+if year(cal_date)=2017 then log_cnt_device_group_android=log(cnt_device_group_android); else  log_cnt_device_group_android=log_cnt_device_group_android;
+if year(cal_date)=2017 then log_cnt_device_group_androidtv=log(cnt_device_group_androidtv); else  log_cnt_device_group_androidtv=log_cnt_device_group_androidtv;
+if year(cal_date)=2017 then log_cnt_device_group_chromecast=log(cnt_device_group_chromecast); else  log_cnt_device_group_chromecast=log_cnt_device_group_chromecast;
+if year(cal_date)=2017 then log_cnt_free_adds_ttl=log(cnt_free_adds_ttl); else  log_cnt_free_adds_ttl=log_cnt_free_adds_ttl;
+if year(cal_date)=2017 then log_cnt_noplay_ttl=log(cnt_noplay_ttl); else  log_cnt_noplay_ttl=log_cnt_noplay_ttl;
+if year(cal_date)=2017 then log_cnt_reconnect_adds_ttl=log(cnt_reconnect_adds_ttl); else  log_cnt_reconnect_adds_ttl=log_cnt_reconnect_adds_ttl;
+if year(cal_date)=2017 then log_cnt_renewals_free_ttl=log(cnt_renewals_free_ttl); else  log_cnt_renewals_free_ttl=log_cnt_renewals_free_ttl;
+if year(cal_date)=2017 then log_cnt_renewals_ttl=log(cnt_renewals_ttl); else  log_cnt_renewals_ttl=log_cnt_renewals_ttl;
+if year(cal_date)=2017 then log_cnt_sub_free_ttl=log(cnt_sub_free_ttl); else  log_cnt_sub_free_ttl=log_cnt_sub_free_ttl;
+if year(cal_date)=2017 then log_cnt_sub_ttl=log(cnt_sub_ttl); else  log_cnt_sub_ttl=log_cnt_sub_ttl;
+run;
+
+
+
+
+
+
+* check outlier;
+*ods html file='h:Shared\SAS\HBO GO\Subscription\CS Support\Call Volume Driver\summary.xls';
+proc univariate data= cs.model_data outtable=summary normaltest;
+histogram  cnt_inqury  cnt_cancellation  cnt_regissue  cnt_trending  cnt_usage_error cnt_total /* cnt_go  cnt_fraud cnt_campaign   cnt_unknow*/
+ cnt_stream  cnt_active cnt_hours_played  cnt_asset_played  cnt_requests cnt_new_sub cnt_renewal cnt_renewal_newsub
+  ;
+run;
+*ods html close;
+
+
+
+* check distribution;
+*beta  exponential  gamma  lognormal  normal  power   Weibull;
+proc univariate data= cs.model_data normaltest;
+var   cnt_inqury  cnt_cancellation  cnt_regissue  cnt_trending  cnt_usage_error count_total;
+probplot   / normal(mu=est sigma=est)  square  odstitle = title;
+probplot   cnt_usage_error / exponential  square  odstitle = title;
+probplot cnt_regissue   cnt_inqury  cnt_cancellation  cnt_total/ lognormal(sigma=est)  square  odstitle = title;
+probplot  / power(alpha=est)  square  odstitle = title;
+inset  mean std / format=6.4;
+run;
+
+
+proc univariate data= cs.model_data normaltest;
+probplot   cnt_new_sub cnt_renewal_newsub cnt_active  cnt_stream cnt_renewal cnt_asset_played  cnt_requests  cnt_hours_played / lognormal(sigma=est)  square  odstitle = title;
+inset  mean std / format=6.4;
+run;
+
+
+* variable fransformation;
+data model_data ;
+set cs.model_data ;
+cnt_usage_error_exp=exp(cnt_usage_error);
+cnt_regissue_lg=log(cnt_regissue);
+cnt_inqury_lg=log(cnt_inqury);
+cnt_cancellation_lg=log(cnt_cancellation);
+cnt_total_lg=log(cnt_total);
+
+cnt_new_sub_lg=log( cnt_new_sub);
+cnt_renewal_lg=log(cnt_renewal);
+cnt_renewal_newsub_lg=log(cnt_renewal_newsub);
+cnt_active_lg=log(cnt_active);
+cnt_stream_lg=log(cnt_stream);
+cnt_hours_played_lg=log(cnt_hours_played);
+cnt_asset_played_lg=log(cnt_asset_played);
+cnt_requests_lg=log(cnt_requests);
+pct_no_stream_request=1-cnt_stream/cnt_requests;
+run;
+
+
+proc corr data= model_data;
+var cnt_inqury_lg  cnt_cancellation_lg  cnt_regissue_lg  cnt_trending  cnt_usage_error_exp cnt_total_lg;
+with  cnt_stream_lg  cnt_active_lg cnt_hours_played_lg  cnt_asset_played_lg  cnt_requests_lg cnt_new_sub_lg cnt_renewal_lg cnt_renewal_newsub_lg ;
+run;
+ 
+
+ods html file='h:Shared\SAS\HBO GO\Subscription\CS Support\Call Volume Driver\summary.xls';
+* check multicolinearity;
+proc reg data=model_data;
+model  cnt_inqury   cnt_cancellation   cnt_regissue   cnt_trending  cnt_usage_error_exp cnt_total 
+= cnt_stream   cnt_active  cnt_hours_played   cnt_asset_played  cnt_requests  cnt_new_sub  cnt_renewal  cnt_renewal_newsub  
+/   tol vif collin   selection=stepwise details=summary;
+run;
+ods html close; 
+
+
+ods html file='h:Shared\SAS\HBO GO\Subscription\CS Support\Call Volume Driver\summary_trans.xls';
+* check multicolinearity;
+proc reg data=model_data;
+model  cnt_inqury_lg  cnt_cancellation_lg  cnt_regissue_lg  cnt_trending  cnt_usage_error_exp cnt_total_lg
+= cnt_stream_lg  cnt_active_lg cnt_hours_played_lg  cnt_asset_played_lg  cnt_requests_lg cnt_new_sub_lg cnt_renewal_lg cnt_renewal_newsub_lg 
+/ tol vif collin  selection=stepwise  details=summary sls=0.05 sle=0.15;
+run;
+ods html close;
+
+
+
+
+*cnt_inqury_lg ;
+proc reg data=model_data;
+model  cnt_inqury_lg  
+=  cnt_hours_played_lg     cnt_requests_lg cnt_new_sub_lg  
+/ tol vif collin   selection=stepwise  details=summary sls=0.05 sle=0.15;
+run;
+
+
+*cnt_cancellation_lg; 
+proc reg data=model_data;
+model    cnt_cancellation_lg  
+= cnt_renewal_newsub_lg cnt_new_sub_lg cnt_renewal_lg cnt_hours_played_lg cnt_stream_lg 
+/ tol vif collin  selection=stepwise  details=summary sls=0.05 sle=0.15;
+run;
+/*
+proc reg data=model_data;
+model    cnt_cancellation 
+= CNT_RENEWAL_NEWSUB CNT_STREAM CNT_HOURS_PLAYED CNT_REQUESTS CNT_ASSET_PLAYED 
+/   tol vif collin   selection=stepwise details=summary;
+run;*/
+
+
+* cnt_regissue_lg;
+proc reg data=model_data;
+model   cnt_regissue_lg  
+= cnt_active_lg cnt_hours_played_lg cnt_new_sub_lg cnt_renewal_newsub_lg 
+/ tol vif collin  selection=stepwise  details=summary sls=0.05 sle=0.15;
+run;
+
+
+*cnt_usage_error_exp;
+proc reg data=model_data;
+model    cnt_usage_error  
+= CNT_ACTIVE CNT_NEW_SUB CNT_HOURS_PLAYED pct_no_stream_request
+/ tol vif collin  selection=stepwise  details=summary sls=0.05 sle=0.15;
+run;
+
+
+*cnt_total ;
+proc reg data=model_data;
+model   cnt_total_lg 
+=  cnt_stream_lg   cnt_hours_played_lg cnt_new_sub_lg  
+/   tol vif collin   selection=stepwise details=summary;
+run;
+ 
+
+
+
+
+* multivariate multiple regression;
+proc glm data= model_data;
+model cnt_inqury_lg  cnt_cancellation_lg  cnt_regissue_lg  cnt_trending  cnt_usage_error_exp cnt_total_lg
+=  cnt_stream_lg  cnt_active_lg cnt_hours_played_lg  cnt_asset_played_lg  cnt_requests_lg cnt_new_sub_lg cnt_renewal_lg cnt_renewal_newsub_lg 
+/ solution ss3 noint  ;
+
+run;
+ 
