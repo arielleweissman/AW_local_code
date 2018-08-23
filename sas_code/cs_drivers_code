@@ -610,7 +610,7 @@ proc means data=score_out; var cnt_cancellation  scored;where act_date > '11Aug2
 /*2*/
 /*proc reg data= model_data outest=reg_score;
 model  cnt_cancellation = 
-/*CNT_ACTIVE_APPLE*/
+/*CNT_ACTIVE_APPLE
 CNT_ACTIVE_GOOGLE
 /*CNT_ACTIVE_ROKU
 CNT_ACTIVE_AMAZON*/
