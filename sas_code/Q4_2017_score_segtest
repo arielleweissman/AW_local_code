@@ -1,0 +1,303 @@
+
+
+* get test and 2 training data;
+data  train train1 train2 test1 test2 ;
+set  cs.model_data_holdout;
+if act_date<'10jul2017'd and act_date>='01feb2017'd  then output train1;
+else if act_date<'01sep2017'd  and  act_date>='10jul2017'd then output train2;
+else  if act_date<'01feb2017'd then output test1;
+else if act_date>='01sep2017'd then output test2 ;
+if act_date<'01sep2017'd then output train;
+run;
+
+proc corr data=train;
+var  cnt_cancellation log_cnt_inqury   log_cnt_regissue   log_cnt_usage_error;
+with pct_active_apple--pct_cnt_free_adds_amazon  log_CNT_REQUESTS_TTL--log_CNT_RECONNECT_ADDS_ROKU	 CNT_REQUESTS_TTL--CNT_REQUESTS_MVPD;run;
+
+
+**************************cancellation;
+proc reg data= train1  outest=reg_score_cancellation;
+model  cnt_cancellation = 
+CNT_ACTIVE_TTL dow_1_ind dow_7_ind CNT_RECONNECT_ADDS_APPLE CNT_RECONNECT_ADDS_GOOGLE log_CNT_FREE_ADDS_TTL  
+/ tol vif collin selection=stepwise  details=summary sls=0.10 sle=0.20;
+output out=t1 p=yhat residual=yresid;
+plot residual.*cnt_cancellation;
+run;
+ 
+proc score data=score_daily score=reg_score_cancellation out=score_out_cancellation type=parms;
+var CNT_ACTIVE_TTL  dow_1_ind dow_7_ind CNT_RECONNECT_ADDS_APPLE CNT_RECONNECT_ADDS_GOOGLE log_CNT_FREE_ADDS_TTL  ;run;
+ 
+
+data score_out_cancellation;
+set score_out_cancellation (keep=act_date cnt_cancellation   model1);
+scored_cancellation= model1 ;
+avg_diff_cancellation=cnt_cancellation-scored_cancellation;
+if act_date>'01feb2017'd and act_date<'10jul2017'd then tp='train1';else
+if act_date<'01sep2017'd and act_date>='10jul2017'd then tp='train2';else
+if act_date<'01feb2017'd then tp='tst1';else
+if act_date>='01sep2017'd and act_date<'10sep2017'd then tp='tst2';
+drop model1;
+run;
+
+proc means data=score_out_cancellation ;class tp; var cnt_cancellation  scored_cancellation avg_diff_cancellation; run;
+
+
+*******************got;
+proc reg data= train2  outest=reg_score_cancellation2;
+model  log_cnt_cancellation =  dow_7_ind  CNT_RENEWALS_FREE_GOOGLE pct_renewals_apple pct_renewals_roku
+CNT_SUB_FREE_TTL CNT_SUB_FREE_GOOGLE CNT_RECONNECT_ADDS_APPLE CNT_SUB_APPLE
+/ tol vif collin selection=stepwise  details=summary sls=0.15 sle=0.15;
+output out=t1 p=yhat residual=yresid;
+plot residual.*log_cnt_cancellation;
+run;
+
+proc score data=score_daily score=reg_score_cancellation2 out=score_out_cancellation2  type=parms;
+var  dow_7_ind  CNT_RENEWALS_FREE_GOOGLE pct_renewals_apple pct_renewals_roku
+CNT_SUB_FREE_TTL CNT_SUB_FREE_GOOGLE CNT_RECONNECT_ADDS_APPLE CNT_SUB_APPLE;run;
+
+data score_out_cancellation2;
+set score_out_cancellation2/*(keep=act_date cnt_cancellation   model1)*/;
+scored_cancellation2=round(exp(model1));
+avg_diff_cancellation2=cnt_cancellation-scored_cancellation2;
+if act_date>'01feb2017'd and act_date<'10jul2017'd then tp='train1';else
+if act_date<'01sep2017'd and act_date>='10jul2017'd then tp='train2';else
+if act_date<'01feb2017'd then tp='tst1';else
+if act_date>='01sep2017'd and act_date<'10sep2017'd then tp='tst2';else
+if act_date>='01oct2017'd and act_date<'10nov2017'd then tp='oct';
+drop model1;
+run;
+
+proc means data=score_out_cancellation2;class tp; var cnt_cancellation  scored_cancellation2 avg_diff_cancellation2; run;
+
+
+
+************************************************log_cnt_inqury ;
+** need more work;
+data train1tt;set train1t;if act_date ne '03jun2017'd and act_date ne '06may2017'd;run;
+proc univariate data= train1tt;
+var  cnt_inqury ;
+histogram  cnt_inqury /LOGNORMAL(color=red)  NORMAL(color=blue)  ;
+ppplot  cnt_inqury   /lognormal;
+run;
+
+proc reg data= train1tt  outest=reg_score_inquiry;
+model  log_cnt_inqury = 
+CNT_FREE_ADDS_AMAZON
+CNT_SUB_APPLE
+dow_2_ind
+dow_1_ind CNT_SUB_TTL 
+/* dow_2_ind CNT_FREE_ADDS_AMAZON  CNT_SUB_APPLE pct_sub_free_google*/
+/ tol vif collin  selection=stepwise details=summary sls=0.05 sle=0.15 ;
+output out=t1 p=yhat residual=yresid;
+plot residual.*log_cnt_inqury;
+run;
+  
+
+proc score data=score_daily score=reg_score_inquiry out=score_out_inquiry   type=parms;
+var CNT_FREE_ADDS_AMAZON
+CNT_SUB_APPLE
+dow_2_ind
+dow_1_ind CNT_SUB_TTL;run;
+
+data score_out_inquiry;
+set score_out_inquiry(keep=act_date cnt_inqury   model1);
+scored_inquiry=round(exp(model1 ));
+avg_diff_inquiry=cnt_inqury -scored_inquiry;
+if act_date>'01feb2017'd and act_date<'10jul2017'd then tp='train1';else
+if act_date<'01sep2017'd and act_date>='10jul2017'd then tp='train2';else
+if act_date<'01feb2017'd then tp='tst1';else
+if act_date>='01sep2017'd and act_date<'10sep2017'd then tp='tst2';
+if act_date>='01oct2017'd and act_date<'10nov2017'd then tp='oct';
+drop model1;
+run;
+
+proc means data=score_out_inquiry;class tp; var cnt_inqury scored_inquiry avg_diff_inquiry; run;
+
+
+
+*** got; 
+proc reg data= train2  outest=reg_score_inquiry2;
+model  log_cnt_inqury = 
+dow_1_ind CNT_RECONNECT_ADDS_APPLE pct_renewals_free_google pct_sub_free_amazon log_CNT_FREE_ADDS_APPLE
+/ tol vif collin selection=stepwise  details=summary sls=0.10 sle=0.25;
+output out=t1 p=yhat residual=yresid;
+plot residual.*log_cnt_inqury;
+run;
+
+proc score data=score_daily score=reg_score_inquiry2 out=score_out_inquiry2   type=parms;
+var dow_1_ind CNT_RECONNECT_ADDS_APPLE pct_renewals_free_google pct_sub_free_amazon log_CNT_FREE_ADDS_APPLE
+;run;
+
+data score_out_inquiry2;
+set score_out_inquiry2(keep=act_date cnt_inqury   model1);
+scored_inquiry2=round(exp( model1 ));
+avg_diff_inquiry2=cnt_inqury -scored_inquiry2;
+if act_date>'01feb2017'd and act_date<'10jul2017'd then tp='train1';else
+if act_date<'01sep2017'd and act_date>='10jul2017'd then tp='train2';else
+if act_date<'01feb2017'd then tp='tst1';else
+if act_date>='01sep2017'd and act_date<'10sep2017'd then tp='tst2';
+if act_date>='01oct2017'd and act_date<'10nov2017'd then tp='oct';
+drop model1;
+run;
+
+proc means data=score_out_inquiry2;class tp; var cnt_inqury scored_inquiry2 avg_diff_inquiry2; run;
+
+
+**************************log_cnt_usage_error  ;
+data train1t;set train1; where act_date ne '28feb2017'd;run;
+
+proc reg data= train1t  outest=reg_score_usage_error;
+model  log_cnt_usage_error = 
+dow_1_ind  CNT_SUB_FREE_APPLE CNT_RECONNECT_ADDS_GOOGLE CNT_RENEWALS_APPLE pct_renewals_free_google pct_sub_free_google 
+CNT_REQUESTS_TTL
+/ tol vif collin selection=stepwise  details=summary sls=0.15 sle=0.25;
+output out=t1 p=yhat residual=yresid;
+plot residual.*log_cnt_usage_error;
+run;
+ 
+proc score data=score_daily score=reg_score_usage_error out=score_out_usage_error   type=parms;
+var dow_1_ind  CNT_SUB_FREE_APPLE CNT_RECONNECT_ADDS_GOOGLE CNT_RENEWALS_APPLE pct_renewals_free_google pct_sub_free_google 
+CNT_REQUESTS_TTL;run;
+
+data score_out_usage_error;
+set score_out_usage_error(keep=act_date cnt_usage_error   model1);
+scored_usage_error=round(exp( model1 ));
+avg_diff_usage_error=cnt_usage_error -scored_usage_error;
+if act_date>'01feb2017'd and act_date<'10jul2017'd then tp='train1';else
+if act_date<'01sep2017'd and act_date>='10jul2017'd then tp='train2';else
+if act_date<'01feb2017'd then tp='tst1';else
+if act_date>='01sep2017'd and act_date<'10sep2017'd then tp='tst2';
+if act_date>='01oct2017'd and act_date<'10nov2017'd then tp='oct';
+drop model1;
+run;
+
+proc means data=score_out_usage_error;class tp; var cnt_usage_error scored_usage_error avg_diff_usage_error; run;
+
+
+
+*** got;
+proc reg data= train2  outest=reg_score_usage_error2;
+model  log_cnt_usage_error = 
+dow_2_ind CNT_RECONNECT_ADDS_ROKU log_CNT_FREE_ADDS_APPLE
+/ tol vif collin selection=stepwise  details=summary sls=0.05 sle=0.25;
+output out=t1 p=yhat residual=yresid;
+plot residual.*log_cnt_usage_error;
+run;
+
+proc score data=score_daily score=reg_score_usage_error2 out=score_out_usage_error2   type=parms;
+var dow_2_ind CNT_RECONNECT_ADDS_ROKU log_CNT_FREE_ADDS_APPLE 
+;run;
+
+data score_out_usage_error2;
+set score_out_usage_error2 (keep=act_date cnt_usage_error   model1);
+scored_usage_error2=round(exp( model1 ));
+avg_diff_usage_error2=cnt_usage_error -scored_usage_error2;
+if act_date>'01feb2017'd and act_date<'10jul2017'd then tp='train1';else
+if act_date<'01sep2017'd and act_date>='10jul2017'd then tp='train2';else
+if act_date<'01feb2017'd then tp='tst1';else
+if act_date>='01sep2017'd and act_date<'10sep2017'd then tp='tst2';
+if act_date>='01oct2017'd and act_date<'10nov2017'd then tp='oct';
+drop model1;
+run;
+
+proc means data=score_out_usage_error2;class tp; var cnt_usage_error scored_usage_error2 avg_diff_usage_error2; run;
+
+
+
+**************************cnt_regissue ;
+proc reg data= train1  outest=reg_score_regissue;
+model  log_cnt_regissue = 
+dow_1_ind dow_3_ind dow_7_ind CNT_RENEWALS_APPLE pct_sub_roku  log_CNT_RECONNECT_ADDS_GOOGLE CNT_REQUESTS_AMAZON
+/ tol vif collin selection=stepwise  details=summary sls=0.05 sle=0.25;
+output out=t1 p=yhat residual=yresid;
+plot residual.*log_cnt_regissue;
+run; 
+
+proc score data=score_daily score=reg_score_regissue out=score_out_regissue   type=parms;
+var dow_1_ind dow_3_ind dow_7_ind CNT_RENEWALS_APPLE pct_sub_roku  log_CNT_RECONNECT_ADDS_GOOGLE CNT_REQUESTS_AMAZON;run;
+
+data score_out_regissue;
+set score_out_regissue(keep=act_date cnt_regissue   model1);
+scored_regissue=round(exp( model1 ));
+avg_diff_regissue=cnt_regissue -scored_regissue;
+if act_date>'01feb2017'd and act_date<'10jul2017'd then tp='train1';else
+if act_date<'01sep2017'd and act_date>='10jul2017'd then tp='train2';else
+if act_date<'01feb2017'd then tp='tst1';else
+if act_date>='01sep2017'd and act_date<'10sep2017'd then tp='tst2';
+if act_date>='01oct2017'd and act_date<'10nov2017'd then tp='oct';
+drop model1;
+run;
+
+proc means data=score_out_regissue;class tp; var cnt_regissue scored_regissue avg_diff_regissue; run;
+
+
+*** got;
+proc reg data= train2  outest=reg_score_regissue2;
+model  log_cnt_regissue = 
+dow_2_ind CNT_FREE_ADDS_AMAZON  
+pct_sub_free_amazon log_CNT_FREE_ADDS_APPLE
+/ tol vif collin selection=stepwise  details=summary sls=0.05 sle=0.25;
+output out=t1 p=yhat residual=yresid;
+plot residual.*log_cnt_regissue;
+run;
+
+proc score data=score_daily score=reg_score_regissue2 out=score_out_regissue2   type=parms;
+var  dow_2_ind CNT_FREE_ADDS_AMAZON  
+pct_sub_free_amazon log_CNT_FREE_ADDS_APPLE
+;run;
+
+
+data score_out_regissue2 ;
+set score_out_regissue2/*(keep=act_date cnt_regissue   model1)*/;
+scored_regissue2=round(exp( model1 ));
+avg_diff_regissue2=cnt_regissue -scored_regissue2;
+if act_date>'01feb2017'd and act_date<'10jul2017'd then tp='train1';else
+if act_date<'01sep2017'd and act_date>='10jul2017'd then tp='train2';else
+if act_date<'01feb2017'd then tp='tst1';else
+if act_date>='01sep2017'd and act_date<'10sep2017'd then tp='tst2';
+if act_date>='01oct2017'd and act_date<'10nov2017'd then tp='oct';
+drop model1;
+run;
+
+proc means data=score_out_regissue2;class tp; var cnt_regissue scored_regissue2 avg_diff_regissue2; run;
+
+/*pct_active_apple--pct_cnt_free_adds_amazon  log_CNT_REQUESTS_TTL--log_CNT_RECONNECT_ADDS_ROKU	 CNT_REQUESTS_TTL--CNT_REQUESTS_MVPD*/	;
+
+
+data fscore;
+set score_daily ;
+set score_out_cancellation;
+set score_out_cancellation2;
+set score_out_usage_error;
+set score_out_usage_error2;
+set score_out_inquiry;
+set score_out_inquiry2;
+set score_out_regissue;
+set score_out_regissue2;
+run;
+ 
+ 
+
+ods html file='h:\Shared\SAS\HBO GO\Subscription\CS Support\corr.xlsx';
+proc corr data=train  ;
+var  log_cnt_cancellation cnt_cancellation log_cnt_inqury  log_cnt_regissue   log_cnt_usage_error ;
+with pct_active_apple--pct_cnt_free_adds_amazon  log_CNT_REQUESTS_TTL--log_CNT_RECONNECT_ADDS_ROKU	 CNT_REQUESTS_TTL--CNT_REQUESTS_MVPD;
+run;
+
+proc corr data=train2 ;
+var    log_cnt_cancellation log_cnt_inqury  log_cnt_regissue   log_cnt_usage_error ;
+with pct_active_apple--pct_cnt_free_adds_amazon  log_CNT_REQUESTS_TTL--log_CNT_RECONNECT_ADDS_ROKU	 CNT_REQUESTS_TTL--CNT_REQUESTS_MVPD;
+run;
+ods html close;
+
+
+
+
+
+
+
+
+
+
+
+
